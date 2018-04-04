@@ -5,6 +5,9 @@ const App = require('actions-on-google').DialogflowApp;
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 
+const Responses = require('actions-on-google').Responses;
+const { RichResponse, BasicCard } = Responses;
+
 const CHECK_PERMISSIONS_ACTION = 'check.permissions';
 const HANDLE_PERMISSIONS_ACTION = 'handle.permissions';
 const SEARCH_WASHROOM_ACTION = 'search.washrooms';
@@ -15,32 +18,43 @@ const PROP_CONTEXT = 'property.context';
 const NAME_ARGUMENT = 'property.name';
 const ADDRESS_ARGUMENT = 'property.address';
 
-const userLocation = {
-			latitude: 18.533876,
-			longitude: 73.827662
-		};
+const USER_CONTEXT = 'user.context';
+const LATITUDE_ARGUMENT = 'user.latitude';
+const LONGITUDE_ARGUMENT = 'user.longitude';
+
+// MAP Integration - Start
+const url = require('url');
+const config = functions.config();
+const STATIC_MAPS_ADDRESS = 'https://maps.googleapis.com/maps/api/staticmap';
+const STATIC_MAPS_SIZE = '600x400';
+const STATIC_MAPS_TYPE = 'roadmap';
+const staticMapsURL = url.parse(STATIC_MAPS_ADDRESS);
+
+staticMapsURL.query = {
+    key: config.maps.key,
+    size: STATIC_MAPS_SIZE,
+    maptype: STATIC_MAPS_TYPE,
+	zoom: 14
+  };
+//END
 
 admin.initializeApp(functions.config().firebase);
 
 exports.washRoomFinder = functions.https.onRequest((request, response) => {
   const app = new App({request, response});
+  let userStorage = app.userStorage;
+  
   console.log('Request headers: ' + JSON.stringify(request.headers));
   console.log('Request body: ' + JSON.stringify(request.body));
 
   function checkPermissions (app) {
-  	let namePermission = app.SupportedPermissions.NAME;
-	let preciseLocationPermission = app.SupportedPermissions.DEVICE_PRECISE_LOCATION;
-
-	// Ask for permissions. User can authorize all or none.
-	app.askForPermissions('To address you by name and know your location',
-		[namePermission, preciseLocationPermission]);
+	app.askForPermission('To address you by name and know your location', 
+	app.SupportedPermissions.DEVICE_PRECISE_LOCATION);
   }
   
   function handlePermissions (app) {
 	  if (app.isPermissionGranted()) {
-			app.userStorage.location = app.getDeviceLocation()
-			app.userStorage.name = app.getUserName().displayName;
-			
+			userStorage.location = app.getDeviceLocation().coordinates;
 			app.ask('Thank you for granting the permissions.');
         } else {
             app.tell('Unauthorized');
@@ -65,6 +79,7 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 	
 	var properties = [];
 	var db = admin.database();
+	var maplink = '';
 	db.ref('/properties').once('value').then(function(snapshot) {
 		
 		snapshot.forEach(function (snap) {
@@ -72,27 +87,43 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 			var item = snap.val();
 			
 			item.key = key;
-			item.distance = distance(userLocation.latitude, userLocation.longitude, item.coordinates.latitude, item.coordinates.longitude);
+			item.distance = distance(userStorage.location.latitude, userStorage.location.longitude, item.coordinates.latitude, item.coordinates.longitude);
 			properties.push(item);
 			
 			console.log(item.name + ' - ' + item.distance);
 		});
 		
 		properties.sort(propertyComparator).slice(0, 3).forEach(function(item) {
+			var description = item.address + ' - ' + Math.round(item.distance, 2) + ' km';
 			list.addItems(app.buildOptionItem(item.key, [item.name])
 									.setTitle(item.name)
-									.setDescription(item.address + ' - ' + item.distance + ' km')
+									.setDescription(description)
 									.setImage(item.imageUrl, item.name)
 						 );
+			maplink = maplink + '&markers=color:red%7Clabel:S%7C' + item.coordinates.latitude + ',' + item.coordinates.longitude;
 		});
 		
-		app.askWithList('Here are a few places nearby. Which sounds better?', list);
+		app.askWithList(pinLocationMarkersResponse(maplink), list);
 		return null;
 		}).catch(error => {
 		console.error(error);
 		return null;
 	});
   }
+  
+  function pinLocationMarkersResponse(maplink) {
+		let userLatitude = userStorage.location.latitude;
+		let userLongitude = userStorage.location.longitude;
+
+		maplink = maplink + '&markers=color:blue%7Clabel:S%7C' + userLatitude + ',' + userLongitude;
+		
+		staticMapsURL.query.center = userLatitude + ',' + userLongitude;
+
+		const mapViewURL = url.format(staticMapsURL);
+
+		return new RichResponse().addSimpleResponse('Here are a few places nearby. Which sounds better?')
+				.addSuggestionLink('Locations in Map', mapViewURL + maplink)
+   }
   
   function propertyMarketing (app) {
    const selectedPropertyId = app.getSelectedOption();
@@ -111,7 +142,7 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 		
 		app.ask(app.buildRichResponse()
 		.addSimpleResponse(selectedProperty.name)
-		.addSuggestionLink('Navigate', 'https://www.google.com/maps/dir/?api=1&origin=' + userLocation.latitude + ',' + userLocation.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
+		.addSuggestionLink('Navigate', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
 		.addBasicCard(app.buildBasicCard(selectedProperty.marketing)
 						  .setTitle(selectedProperty.name)
 						  .addButton('Review', 'http://www.washroom-portal/review/' + selectedPropertyId)
