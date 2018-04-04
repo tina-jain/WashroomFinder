@@ -6,6 +6,7 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 
 const CHECK_PERMISSIONS_ACTION = 'check.permissions';
+const HANDLE_PERMISSIONS_ACTION = 'handle.permissions';
 const SEARCH_WASHROOM_ACTION = 'search.washrooms';
 const PROPERTY_MARKETING_ACTION = 'property.marketing';
 const PROPERTY_NAVIGATE_ACTION = 'property.navigate';
@@ -22,7 +23,23 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
   console.log('Request body: ' + JSON.stringify(request.body));
 
   function checkPermissions (app) {
-  	app.ask('Sorry checkPermissions is not implemented');
+  	let namePermission = app.SupportedPermissions.NAME;
+	let preciseLocationPermission = app.SupportedPermissions.DEVICE_PRECISE_LOCATION;
+
+	// Ask for permissions. User can authorize all or none.
+	app.askForPermissions('To address you by name and know your location',
+		[namePermission, preciseLocationPermission]);
+  }
+  
+  function handlePermissions (app) {
+	  if (app.isPermissionGranted()) {
+			app.userStorage.location = app.getDeviceLocation()
+			app.userStorage.name = app.getUserName().displayName;
+			
+			app.ask('Thank you for granting the permissions.');
+        } else {
+            app.tell('Unauthorized');
+        }
   }
   
   function searchWashrooms (app) {
@@ -50,10 +67,9 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
   }
   
   function propertyMarketing (app) {
-   const param = app.getSelectedOption();
-   var name = param;
+   const selectedPropertyId = app.getSelectedOption();
    var db = admin.database();
-   db.ref('/properties/' + param).once('value').then(function(snapshot) {
+   db.ref('/properties/' + selectedPropertyId).once('value').then(function(snapshot) {
 	   var selectedProperty = snapshot.val();
 		console.log('Selected: ' + selectedProperty.name);
 		
@@ -62,7 +78,25 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 		parameters[ADDRESS_ARGUMENT] = selectedProperty.address;
 		
 		app.setContext(PROP_CONTEXT, 1, parameters);
-		app.ask(selectedProperty.name + ' is an excellent choice. ' + selectedProperty.marketing +' Please leave us a review about washroom at ' + param + '. Would you like me to navigate you?');
+		
+		var userLocation = {
+			latitude: 18.533876,
+			longitude: 73.827662
+		};
+		
+		var coordinates = selectedProperty.coordinates;
+		
+		app.ask(app.buildRichResponse()
+		.addSimpleResponse(selectedProperty.name)
+		.addBasicCard(app.buildBasicCard(selectedProperty.marketing)
+						  .setTitle(selectedProperty.name)
+						  .addButton('Review', 'http://www.washroom-portal/review/' + selectedPropertyId)
+						  .setImage(selectedProperty.imageUrl, selectedProperty.name)
+						  .setImageDisplay('CROPPED')
+			)
+		);
+		
+		//app.ask(selectedProperty.name + ' is an excellent choice. ' + selectedProperty.marketing +' Please leave us a review about washroom at ' + param + '. Would you like me to navigate you?');
 		
 		return null;
 		}).catch(error => {
@@ -80,14 +114,10 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
   // d. build an action map, which maps intent names to functions
   let actionMap = new Map();
   actionMap.set(CHECK_PERMISSIONS_ACTION, checkPermissions);
+  actionMap.set(HANDLE_PERMISSIONS_ACTION, handlePermissions);
   actionMap.set(SEARCH_WASHROOM_ACTION, searchWashrooms);
   actionMap.set(PROPERTY_MARKETING_ACTION, propertyMarketing);
   actionMap.set(PROPERTY_NAVIGATE_ACTION, propertyNavigate);
-  //actionMap.set(app.StandardIntents.OPTION, optionIntent);
-  //actionMap.set(app.StandardIntents.OPTION, () => {
-  //	const param = app.getSelectedOption();
-  //  app.ask('You did not select any item from the list');
-  //});
-
-app.handleRequest(actionMap);
+  
+  app.handleRequest(actionMap);
 });
