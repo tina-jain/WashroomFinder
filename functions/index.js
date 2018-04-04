@@ -15,6 +15,11 @@ const PROP_CONTEXT = 'property.context';
 const NAME_ARGUMENT = 'property.name';
 const ADDRESS_ARGUMENT = 'property.address';
 
+const userLocation = {
+			latitude: 18.533876,
+			longitude: 73.827662
+		};
+
 admin.initializeApp(functions.config().firebase);
 
 exports.washRoomFinder = functions.https.onRequest((request, response) => {
@@ -42,20 +47,43 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
         }
   }
   
+  function distance(lat1, lon1, lat2, lon2) {
+   var piValue = 0.017453292519943295;    // Math.PI / 180
+   var dist = 0.5 - Math.cos((lat2 - lat1) * piValue)/2 + 
+           Math.cos(lat1 * piValue) * Math.cos(lat2 * piValue) *
+           (1 - Math.cos((lon2 - lon1) * piValue))/2;
+ 
+   return 12742 * Math.asin(Math.sqrt(dist)); // 2  R; R = 6371 km
+ }
+  
+  function propertyComparator(first, second) {
+	return first.distance - second.distance;
+ }
+
   function searchWashrooms (app) {
   	var list = app.buildList('Washrooms nearby')
 	
+	var properties = [];
 	var db = admin.database();
 	db.ref('/properties').once('value').then(function(snapshot) {
 		
 		snapshot.forEach(function (snap) {
 			var key = snap.key;
 			var item = snap.val();
-			list.addItems(app.buildOptionItem(key, [item.name])
+			
+			item.key = key;
+			item.distance = distance(userLocation.latitude, userLocation.longitude, item.coordinates.latitude, item.coordinates.longitude);
+			properties.push(item);
+			
+			console.log(item.name + ' - ' + item.distance);
+		});
+		
+		properties.sort(propertyComparator).slice(0, 3).forEach(function(item) {
+			list.addItems(app.buildOptionItem(item.key, [item.name])
 									.setTitle(item.name)
-									.setDescription(item.address)
+									.setDescription(item.address + ' - ' + item.distance + ' km')
 									.setImage(item.imageUrl, item.name)
-						 )			
+						 );
 		});
 		
 		app.askWithList('Here are a few places nearby. Which sounds better?', list);
@@ -78,16 +106,12 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 		parameters[ADDRESS_ARGUMENT] = selectedProperty.address;
 		
 		app.setContext(PROP_CONTEXT, 1, parameters);
-		
-		var userLocation = {
-			latitude: 18.533876,
-			longitude: 73.827662
-		};
-		
+			
 		var coordinates = selectedProperty.coordinates;
 		
 		app.ask(app.buildRichResponse()
 		.addSimpleResponse(selectedProperty.name)
+		.addSuggestionLink('Navigate', 'https://www.google.com/maps/dir/?api=1&origin=' + userLocation.latitude + ',' + userLocation.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
 		.addBasicCard(app.buildBasicCard(selectedProperty.marketing)
 						  .setTitle(selectedProperty.name)
 						  .addButton('Review', 'http://www.washroom-portal/review/' + selectedPropertyId)
@@ -95,9 +119,6 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 						  .setImageDisplay('CROPPED')
 			)
 		);
-		
-		//app.ask(selectedProperty.name + ' is an excellent choice. ' + selectedProperty.marketing +' Please leave us a review about washroom at ' + param + '. Would you like me to navigate you?');
-		
 		return null;
 		}).catch(error => {
 		console.error(error);
