@@ -22,6 +22,10 @@ const USER_CONTEXT = 'user.context';
 const LATITUDE_ARGUMENT = 'user.latitude';
 const LONGITUDE_ARGUMENT = 'user.longitude';
 
+//ARGUMENTS
+const FILTER_ARGUMENT = 'washroom-filters';
+const PAYMENT_ARGUMENT = 'washroom-payment-type';
+
 // MAP Integration - Start
 const url = require('url');
 const config = functions.config();
@@ -46,15 +50,15 @@ admin.initializeApp(functions.config().firebase);
 exports.washRoomFinder = functions.https.onRequest((request, response) => {
   const app = new App({request, response});
   let userStorage = app.userStorage;
-  
+
   console.log('Request headers: ' + JSON.stringify(request.headers));
   console.log('Request body: ' + JSON.stringify(request.body));
 
   function checkPermissions (app) {
-	app.askForPermission('To address you by name and know your location', 
+	app.askForPermission('To address you by name and know your location',
 	app.SupportedPermissions.DEVICE_PRECISE_LOCATION);
   }
-  
+
   function handlePermissions (app) {
 	  if (app.isPermissionGranted()) {
 			userStorage.location = app.getDeviceLocation().coordinates;
@@ -63,40 +67,73 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
             app.tell('Unauthorized');
         }
   }
-  
+
   function calcDistance(lat1, lon1, lat2, lon2) {
    var piValue = 0.017453292519943295;    // Math.PI / 180
-   var dist = 0.5 - Math.cos((lat2 - lat1) * piValue)/2 + 
+   var dist = 0.5 - Math.cos((lat2 - lat1) * piValue)/2 +
            Math.cos(lat1 * piValue) * Math.cos(lat2 * piValue) *
            (1 - Math.cos((lon2 - lon1) * piValue))/2;
- 
+
    return 12742 * Math.asin(Math.sqrt(dist)); // 2  R; R = 6371 km
-}  
-  
+}
+
   function propertyComparator(first, second) {
 	return first.distance - second.distance;
  }
 
   function searchWashrooms (app) {
   	var list = app.buildList('Washrooms nearby')
-	
+
+		var filter = app.getArgument(FILTER_ARGUMENT);
+		var paymentFilter = app.getArgument(PAYMENT_ARGUMENT);
+
 	var properties = [];
 	var destinations = [];
 	var db = admin.database();
 	var maplink = '';
 	db.ref('/properties').once('value').then(function(snapshot) {
-		
+
 		snapshot.forEach(function (snap) {
 			var key = snap.key;
 			var item = snap.val();
-			
+
 			item.key = key;
-			properties.push(item);
-			
-			console.log(item.name + ' - ' + item.distance);
-			destinations.push(item.coordinates.latitude + ',' + item.coordinates.longitude);
+
+			var keywords = item.keywords.split(',');
+
+			if(filter)
+				console.log('Filter KEYWORD found: ' + filter );
+			if(paymentFilter)
+					console.log('Filter PAYMENT_FILTER found: ' + paymentFilter);
+			//if (typeof filter === 'string' && filter.length === 0){
+
+			var passesFilter = true;
+
+			if (paymentFilter){
+				console.log('payment Filter found' + paymentFilter );
+				if(item.payment.paymentType !== paymentFilter)
+					passesFilter = false;
+				else
+					console.log('found required ' + paymentFilter + ' in item ' + item.name );
+			}
+
+			if (filter){
+				console.log('Filter KEYWORD found' + filter );
+				if(item.keywords.indexOf(filter) < 0)
+					passesFilter = false;
+				else
+					console.log('Found ' + filter + ' KEYWORD in item ' + item.name );
+			}
+
+			if(passesFilter){
+				properties.push(item);
+				destinations.push(item.coordinates.latitude + ',' + item.coordinates.longitude);
+			}
 		});
-		
+
+		if(properties.length === 0)
+			return app.ask('No washrooms found with given perferences. Please try again with different preferences');
+
 		var origins = [userStorage.location.latitude + ',' + userStorage.location.longitude];
 		distanceApi.matrix(origins, destinations, function (err, distances) {
 			console.log("DistanceCal: response start");
@@ -120,33 +157,49 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 						console.log('DistanceCal: ' + destination + ' is not reachable by land from ' + origin);
 					}
 				}
-				
-				properties.sort(propertyComparator).slice(0, 3).forEach(function(item) {
-				var description = item.address + ' - ' + item.distanceText;
-				list.addItems(app.buildOptionItem(item.key, [item.name])
-										.setTitle(item.name)
-										.setDescription(description)
-										.setImage(item.imageUrl, item.name)
-							 );
-				maplink = maplink + '&markers=color:red%7Clabel:S%7C' + item.coordinates.latitude + ',' + item.coordinates.longitude;
-				});
-				app.askWithList(pinLocationMarkersResponse(maplink), list);
+
+				if(properties.length === 1) {
+					var item = properties[0];
+					var coordinates = item.coordinates;
+					app.ask(app.buildRichResponse()
+					.addSimpleResponse(item.name)
+					.addSuggestionLink('Navigate', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
+					.addBasicCard(app.buildBasicCard(item.address + ' - ' + item.distanceText + item.marketing)
+									  .setTitle(item.name)
+									  .addButton('Review', 'http://www.washroom-portal/review/' + item.key)
+									  .setImage(item.imageUrl, item.name)
+									  .setImageDisplay('CROPPED')
+						)
+					);
+				}
+				else {
+					properties.sort(propertyComparator).slice(0, 3).forEach(function(item) {
+					var description = item.address + ' - ' + item.distanceText;
+					list.addItems(app.buildOptionItem(item.key, [item.name])
+											.setTitle(item.name)
+											.setDescription(description)
+											.setImage(item.imageUrl, item.name)
+								 );
+					maplink = maplink + '&markers=color:red%7Clabel:S%7C' + item.coordinates.latitude + ',' + item.coordinates.longitude;
+					});
+					app.askWithList(pinLocationMarkersResponse(maplink), list);
+				}
 			}
 		});
-		
+
 		return null;
 		}).catch(error => {
 		console.error(error);
 		return null;
 	});
   }
-  
+
   function pinLocationMarkersResponse(maplink) {
 		let userLatitude = userStorage.location.latitude;
 		let userLongitude = userStorage.location.longitude;
 
 		maplink = maplink + '&markers=color:blue%7Clabel:S%7C' + userLatitude + ',' + userLongitude;
-		
+
 		staticMapsURL.query.center = userLatitude + ',' + userLongitude;
 
 		const mapViewURL = url.format(staticMapsURL);
@@ -154,22 +207,22 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 		return new RichResponse().addSimpleResponse('Here are a few places nearby. Which sounds better?')
 				.addSuggestionLink('Locations in Map', mapViewURL + maplink)
    }
-  
+
   function propertyMarketing (app) {
    const selectedPropertyId = app.getSelectedOption();
    var db = admin.database();
    db.ref('/properties/' + selectedPropertyId).once('value').then(function(snapshot) {
 	   var selectedProperty = snapshot.val();
 		console.log('Selected: ' + selectedProperty.name);
-		
+
 		const parameters = {};
 		parameters[NAME_ARGUMENT] = selectedProperty.name;
 		parameters[ADDRESS_ARGUMENT] = selectedProperty.address;
-		
+
 		app.setContext(PROP_CONTEXT, 1, parameters);
-			
+
 		var coordinates = selectedProperty.coordinates;
-		
+
 		app.ask(app.buildRichResponse()
 		.addSimpleResponse(selectedProperty.name)
 		.addSuggestionLink('Navigate', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
@@ -186,13 +239,13 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 		return null;
 	});
   }
-  
+
   function propertyNavigate (app) {
 	let address = app.getContextArgument(PROP_CONTEXT, ADDRESS_ARGUMENT).value;
 	console.log(address);
   	app.tell('Sorry propertyNavigate is not implemented');
   }
-  
+
   // d. build an action map, which maps intent names to functions
   let actionMap = new Map();
   actionMap.set(CHECK_PERMISSIONS_ACTION, checkPermissions);
@@ -200,6 +253,6 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
   actionMap.set(SEARCH_WASHROOM_ACTION, searchWashrooms);
   actionMap.set(PROPERTY_MARKETING_ACTION, propertyMarketing);
   actionMap.set(PROPERTY_NAVIGATE_ACTION, propertyNavigate);
-  
+
   app.handleRequest(actionMap);
 });
