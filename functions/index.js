@@ -4,7 +4,7 @@ process.env.DEBUG = 'actions-on-google:*';
 const App = require('actions-on-google').DialogflowApp;
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
-
+const distanceApi = require('google-distance-matrix');
 const Responses = require('actions-on-google').Responses;
 const { RichResponse, BasicCard } = Responses;
 
@@ -38,6 +38,9 @@ staticMapsURL.query = {
   };
 //END
 
+distanceApi.key('AIzaSyCFaspOuiFvWc49Ex40Rgs9cAZs5FQS-TU');
+distanceApi.mode('walking');
+
 admin.initializeApp(functions.config().firebase);
 
 exports.washRoomFinder = functions.https.onRequest((request, response) => {
@@ -61,14 +64,14 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
         }
   }
   
-  function distance(lat1, lon1, lat2, lon2) {
+  function calcDistance(lat1, lon1, lat2, lon2) {
    var piValue = 0.017453292519943295;    // Math.PI / 180
    var dist = 0.5 - Math.cos((lat2 - lat1) * piValue)/2 + 
            Math.cos(lat1 * piValue) * Math.cos(lat2 * piValue) *
            (1 - Math.cos((lon2 - lon1) * piValue))/2;
  
    return 12742 * Math.asin(Math.sqrt(dist)); // 2  R; R = 6371 km
- }
+}  
   
   function propertyComparator(first, second) {
 	return first.distance - second.distance;
@@ -78,6 +81,7 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
   	var list = app.buildList('Washrooms nearby')
 	
 	var properties = [];
+	var destinations = [];
 	var db = admin.database();
 	var maplink = '';
 	db.ref('/properties').once('value').then(function(snapshot) {
@@ -87,23 +91,49 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 			var item = snap.val();
 			
 			item.key = key;
-			item.distance = distance(userStorage.location.latitude, userStorage.location.longitude, item.coordinates.latitude, item.coordinates.longitude);
 			properties.push(item);
 			
 			console.log(item.name + ' - ' + item.distance);
+			destinations.push(item.coordinates.latitude + ',' + item.coordinates.longitude);
 		});
 		
-		properties.sort(propertyComparator).slice(0, 3).forEach(function(item) {
-			var description = item.address + ' - ' + Math.round(item.distance, 2) + ' km';
-			list.addItems(app.buildOptionItem(item.key, [item.name])
-									.setTitle(item.name)
-									.setDescription(description)
-									.setImage(item.imageUrl, item.name)
-						 );
-			maplink = maplink + '&markers=color:red%7Clabel:S%7C' + item.coordinates.latitude + ',' + item.coordinates.longitude;
+		var origins = [userStorage.location.latitude + ',' + userStorage.location.longitude];
+		distanceApi.matrix(origins, destinations, function (err, distances) {
+			console.log("DistanceCal: response start");
+			if (err) {
+				console.log("DistanceCal: error");
+				return;
+			}
+			if(!distances) {
+				console.log("DistanceCal: Nothing");
+				return;
+			}
+			if (distances.status === 'OK') {
+				var origin = distances.origin_addresses[0];
+				for (var j = 0; j < destinations.length; j++) {
+					var destination = distances.destination_addresses[j];
+					if (distances.rows[0].elements[j].status === 'OK') {
+						properties[j].distance = distances.rows[0].elements[j].distance.value / 1000;
+						properties[j].distanceText = distances.rows[0].elements[j].distance.text;
+						console.log('DistanceCal: Distance from ' + origin + ' to ' + destination + ' is ' + properties[j].distanceText);
+					} else {
+						console.log('DistanceCal: ' + destination + ' is not reachable by land from ' + origin);
+					}
+				}
+				
+				properties.sort(propertyComparator).slice(0, 3).forEach(function(item) {
+				var description = item.address + ' - ' + item.distanceText;
+				list.addItems(app.buildOptionItem(item.key, [item.name])
+										.setTitle(item.name)
+										.setDescription(description)
+										.setImage(item.imageUrl, item.name)
+							 );
+				maplink = maplink + '&markers=color:red%7Clabel:S%7C' + item.coordinates.latitude + ',' + item.coordinates.longitude;
+				});
+				app.askWithList(pinLocationMarkersResponse(maplink), list);
+			}
 		});
 		
-		app.askWithList(pinLocationMarkersResponse(maplink), list);
 		return null;
 		}).catch(error => {
 		console.error(error);
