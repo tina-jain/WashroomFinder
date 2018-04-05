@@ -164,7 +164,7 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 					app.ask(app.buildRichResponse()
 					.addSimpleResponse(item.name)
 					.addSuggestionLink('Navigate', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
-					.addBasicCard(app.buildBasicCard(item.address + ' - ' + item.distanceText + item.marketing)
+					.addBasicCard(app.buildBasicCard(item.address + ' - ' + item.distanceText +'. '+ item.marketing)
 									  .setTitle(item.name)
 									  .addButton('Review', 'http://www.washroom-portal/review/' + item.key)
 									  .setImage(item.imageUrl, item.name)
