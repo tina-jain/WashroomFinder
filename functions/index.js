@@ -47,14 +47,15 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
   console.log('Request body: ' + JSON.stringify(request.body));
 
   function checkPermissions (app) {
-	app.askForPermission('To address you by name and know your location',
-	app.SupportedPermissions.DEVICE_PRECISE_LOCATION);
+      app.askForPermissions('To address you by name and know your location',
+          [app.SupportedPermissions.DEVICE_PRECISE_LOCATION, app.SupportedPermissions.NAME]);
   }
 
   function handlePermissions (app) {
 	  if (app.isPermissionGranted()) {
-			userStorage.location = app.getDeviceLocation().coordinates;
-			app.ask('Thank you for granting the permissions.');
+            userStorage.location = app.getDeviceLocation().coordinates;
+	        userStorage.name = app.getUserName().displayName;
+		    app.ask('Thank you for granting the permissions.');
         } else {
             app.tell('Unauthorized');
         }
@@ -215,9 +216,10 @@ function capitalizeFirstLetter(string) {
 		console.log(userStorage.selectedProperty.id);
 		app.tell(app.buildRichResponse()
 		.addSimpleResponse(userStorage.selectedProperty.name)
-		.addBasicCard(app.buildBasicCard('Please give your valuable feedback to help us serve you better')
+		.addBasicCard(app.buildBasicCard('Please give your valuable feedback to help us serve you better!')
 						  .setTitle(userStorage.selectedProperty.name)
-						  .addButton('Review', 'https://washroomfinder-80159.firebaseapp.com/review.html?property=' + userStorage.selectedProperty.id)
+            .addButton('Review', 'https://washroomfinder-80159.firebaseapp.com/review.html?property=' + userStorage.selectedProperty.id
+                                                                    + '&user=' + userStorage.name)
 			)
 		);
 	  }
