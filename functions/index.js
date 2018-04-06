@@ -203,7 +203,9 @@ function capitalizeFirstLetter(string) {
    
    var db = admin.database();
    db.ref('/properties/' + selectedPropertyId).once('value').then(function(snapshot) {
-        showSelectedCard(snapshot.val(), true);
+		var property = snapshot.val();
+		property.key = selectedPropertyId;
+        showSelectedCard(property, true);
 		return null;
 		}).catch(error => {
 		console.error(error);
@@ -213,12 +215,11 @@ function capitalizeFirstLetter(string) {
 
   function propertyReview (app) {
 	  if(userStorage.selectedProperty) {
-		console.log(userStorage.selectedProperty.id);
 		app.tell(app.buildRichResponse()
 		.addSimpleResponse(userStorage.selectedProperty.name)
 		.addBasicCard(app.buildBasicCard('Please give your valuable feedback to help us serve you better!')
 						  .setTitle(userStorage.selectedProperty.name)
-            .addButton('Review', 'https://washroomfinder-80159.firebaseapp.com/review.html?property=' + userStorage.selectedProperty.id
+            .addButton('Review', 'https://washroomfinder-80159.firebaseapp.com/review.html?property=' + userStorage.selectedProperty.key
                                                                     + '&user=' + userStorage.name)
 			)
 		);
@@ -226,7 +227,7 @@ function capitalizeFirstLetter(string) {
   }
 
   function showSelectedCard(selectedProperty, selected) {
-      userStorage.selectedProperty = { id: selectedProperty.key, name: selectedProperty.name };
+      userStorage.selectedProperty = { key: selectedProperty.key, name: selectedProperty.name };
 
       console.log('Selected: ' + selectedProperty.name);
       var coordinates = selectedProperty.coordinates;
