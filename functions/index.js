@@ -219,8 +219,8 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
                 .addSimpleResponse(userStorage.selectedProperty.name)
                 .addBasicCard(app.buildBasicCard('Please give your valuable feedback to help us serve you better!')
                     .setTitle(userStorage.selectedProperty.name)
-                    .addButton('Review', 'https://washroomfinder-80159.firebaseapp.com/review.html?property=' + userStorage.selectedProperty.key
-                    + '&propName=' + userStorage.selectedProperty.name + '&user=' + userStorage.name)
+                    .addButton('Review', 'https://washroomfinder-80159.firebaseapp.com/review.html?user=' + userStorage.name
+                                                            + '&propertyName=' + userStorage.selectedProperty.name + '&propertyId=' + userStorage.selectedProperty.key)
                 )
             );
         }
