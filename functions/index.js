@@ -12,15 +12,7 @@ const CHECK_PERMISSIONS_ACTION = 'check.permissions';
 const HANDLE_PERMISSIONS_ACTION = 'handle.permissions';
 const SEARCH_WASHROOM_ACTION = 'search.washrooms';
 const PROPERTY_MARKETING_ACTION = 'property.marketing';
-const PROPERTY_NAVIGATE_ACTION = 'property.navigate';
-
-const PROP_CONTEXT = 'property.context';
-const NAME_ARGUMENT = 'property.name';
-const ADDRESS_ARGUMENT = 'property.address';
-
-const USER_CONTEXT = 'user.context';
-const LATITUDE_ARGUMENT = 'user.latitude';
-const LONGITUDE_ARGUMENT = 'user.longitude';
+const PROPERTY_REVIEW_ACTION = 'property.review';
 
 //ARGUMENTS
 const FILTER_ARGUMENT = 'washroom-filters';
@@ -47,7 +39,7 @@ distanceApi.mode('walking');
 
 admin.initializeApp(functions.config().firebase);
 
-exports.washRoomFinder = functions.https.onRequest((request, response) => {
+exports.freshroomsApi = functions.https.onRequest((request, response) => {
   const app = new App({request, response});
   let userStorage = app.userStorage;
 
@@ -105,7 +97,6 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 				console.log('Filter KEYWORD found: ' + filter );
 			if(paymentFilter)
 					console.log('Filter PAYMENT_FILTER found: ' + paymentFilter);
-			//if (typeof filter === 'string' && filter.length === 0){
 
 			var passesFilter = true;
 
@@ -159,16 +150,20 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 				}
 
 				if(properties.length === 1) {
-					var item = properties[0];
-					var coordinates = item.coordinates;
-					app.ask(app.buildRichResponse()
-					.addSimpleResponse(item.name)
-					.addSuggestionLink('Navigate', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
-					.addBasicCard(app.buildBasicCard(item.address + ' - ' + item.distanceText +'. '+ item.marketing)
-									  .setTitle(item.name)
-									  .addButton('Review', 'http://www.washroom-portal/review/' + item.key)
-									  .setImage(item.imageUrl, item.name)
-									  .setImageDisplay('CROPPED')
+                    var item = properties[0];
+
+                    userStorage.selectedProperty = { id: item.key, name: item.name };
+
+                    console.log('Selected: ' + item.name);
+                    var coordinates = item.coordinates;
+
+				    app.ask(app.buildRichResponse()
+                        .addSimpleResponse(item.name)
+                        .addBasicCard(app.buildBasicCard(item.address + ' - ' + item.distanceText + '. ' + item.marketing)
+                            .setTitle(item.name)
+				            .addButton('Navigate Me', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude + '&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
+                            .setImage(item.imageUrl, item.name)
+				            .setImageDisplay('CROPPED')
 						)
 					);
 				}
@@ -210,25 +205,21 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 
   function propertyMarketing (app) {
    const selectedPropertyId = app.getSelectedOption();
+   
    var db = admin.database();
    db.ref('/properties/' + selectedPropertyId).once('value').then(function(snapshot) {
 	   var selectedProperty = snapshot.val();
+	   
+		userStorage.selectedProperty = {id: selectedPropertyId, name: selectedProperty.name};
+	   
 		console.log('Selected: ' + selectedProperty.name);
-
-		const parameters = {};
-		parameters[NAME_ARGUMENT] = selectedProperty.name;
-		parameters[ADDRESS_ARGUMENT] = selectedProperty.address;
-
-		app.setContext(PROP_CONTEXT, 1, parameters);
-
 		var coordinates = selectedProperty.coordinates;
 
 		app.ask(app.buildRichResponse()
 		.addSimpleResponse(selectedProperty.name)
-		.addSuggestionLink('Navigate', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
 		.addBasicCard(app.buildBasicCard(selectedProperty.marketing)
 						  .setTitle(selectedProperty.name)
-						  .addButton('Review', 'http://www.washroom-portal/review/' + selectedPropertyId)
+						  .addButton('Navigate Me', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
 						  .setImage(selectedProperty.imageUrl, selectedProperty.name)
 						  .setImageDisplay('CROPPED')
 			)
@@ -240,10 +231,17 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
 	});
   }
 
-  function propertyNavigate (app) {
-	let address = app.getContextArgument(PROP_CONTEXT, ADDRESS_ARGUMENT).value;
-	console.log(address);
-  	app.tell('Sorry propertyNavigate is not implemented');
+  function propertyReview (app) {
+	  if(userStorage.selectedProperty) {
+		console.log(userStorage.selectedProperty.id);
+		app.tell(app.buildRichResponse()
+		.addSimpleResponse(userStorage.selectedProperty.name)
+		.addBasicCard(app.buildBasicCard('Please give your valuable feedback to help us serve you better')
+						  .setTitle(userStorage.selectedProperty.name)
+						  .addButton('Review', 'https://washroomfinder-80159.firebaseapp.com/review.html?property=' + userStorage.selectedProperty.id)
+			)
+		);
+	  }
   }
 
   // d. build an action map, which maps intent names to functions
@@ -252,7 +250,7 @@ exports.washRoomFinder = functions.https.onRequest((request, response) => {
   actionMap.set(HANDLE_PERMISSIONS_ACTION, handlePermissions);
   actionMap.set(SEARCH_WASHROOM_ACTION, searchWashrooms);
   actionMap.set(PROPERTY_MARKETING_ACTION, propertyMarketing);
-  actionMap.set(PROPERTY_NAVIGATE_ACTION, propertyNavigate);
+  actionMap.set(PROPERTY_REVIEW_ACTION, propertyReview);
 
   app.handleRequest(actionMap);
 });
