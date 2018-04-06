@@ -102,7 +102,7 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
 
 			if (paymentFilter){
 				console.log('payment Filter found' + paymentFilter );
-				if(item.payment.paymentType !== paymentFilter)
+                if (item.payment.paymentType.toLowerCase() !== paymentFilter.toLowerCase())
 					passesFilter = false;
 				else
 					console.log('found required ' + paymentFilter + ' in item ' + item.name );
@@ -110,7 +110,7 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
 
 			if (filter){
 				console.log('Filter KEYWORD found' + filter );
-				if(item.keywords.indexOf(filter) < 0)
+                if (item.keywords.toLowerCase().indexOf(filter.toLowerCase()) < 0)
 					passesFilter = false;
 				else
 					console.log('Found ' + filter + ' KEYWORD in item ' + item.name );
@@ -127,7 +127,6 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
 
 		var origins = [userStorage.location.latitude + ',' + userStorage.location.longitude];
 		distanceApi.matrix(origins, destinations, function (err, distances) {
-			console.log("DistanceCal: response start");
 			if (err) {
 				console.log("DistanceCal: error");
 				return;
@@ -150,26 +149,17 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
 				}
 
 				if(properties.length === 1) {
-                    var item = properties[0];
-
-                    userStorage.selectedProperty = { id: item.key, name: item.name };
-
-                    console.log('Selected: ' + item.name);
-                    var coordinates = item.coordinates;
-
-				    app.ask(app.buildRichResponse()
-                        .addSimpleResponse(item.name)
-                        .addBasicCard(app.buildBasicCard(item.address + ' - ' + item.distanceText + '. ' + item.marketing)
-                            .setTitle(item.name)
-				            .addButton('Navigate Me', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude + '&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
-                            .setImage(item.imageUrl, item.name)
-				            .setImageDisplay('CROPPED')
-						)
-					);
+				    showSelectedCard(properties[0], false);
 				}
 				else {
 					properties.sort(propertyComparator).slice(0, 3).forEach(function(item) {
-					var description = item.address + ' - ' + item.distanceText;
+                    var description = item.address
+                            + '  \nDistance: ' + item.distanceText
+                            + ', ' + capitalizeFirstLetter(item.payment.paymentType);
+
+					if (item.review && item.review.rating)
+					    description += ', Rating: ' + item.review.rating + " (" + item.review.count + " reviews)";
+
 					list.addItems(app.buildOptionItem(item.key, [item.name])
 											.setTitle(item.name)
 											.setDescription(description)
@@ -188,6 +178,10 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
 		return null;
 	});
   }
+
+function capitalizeFirstLetter(string) {
+    return string.charAt(0).toUpperCase() + string.slice(1);
+}
 
   function pinLocationMarkersResponse(maplink) {
 		let userLatitude = userStorage.location.latitude;
@@ -208,22 +202,7 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
    
    var db = admin.database();
    db.ref('/properties/' + selectedPropertyId).once('value').then(function(snapshot) {
-	   var selectedProperty = snapshot.val();
-	   
-		userStorage.selectedProperty = {id: selectedPropertyId, name: selectedProperty.name};
-	   
-		console.log('Selected: ' + selectedProperty.name);
-		var coordinates = selectedProperty.coordinates;
-
-		app.ask(app.buildRichResponse()
-		.addSimpleResponse(selectedProperty.name)
-		.addBasicCard(app.buildBasicCard(selectedProperty.marketing)
-						  .setTitle(selectedProperty.name)
-						  .addButton('Navigate Me', 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude +'&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking')
-						  .setImage(selectedProperty.imageUrl, selectedProperty.name)
-						  .setImageDisplay('CROPPED')
-			)
-		);
+        showSelectedCard(snapshot.val(), true);
 		return null;
 		}).catch(error => {
 		console.error(error);
@@ -242,6 +221,30 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
 			)
 		);
 	  }
+  }
+
+  function showSelectedCard(selectedProperty, selected) {
+      userStorage.selectedProperty = { id: selectedProperty.key, name: selectedProperty.name };
+
+      console.log('Selected: ' + selectedProperty.name);
+      var coordinates = selectedProperty.coordinates;
+
+      var navigateUrl = 'https://www.google.com/maps/dir/?api=1&origin=' + userStorage.location.latitude + ',' + userStorage.location.longitude
+          + '&destination=' + coordinates.latitude + ',' + coordinates.longitude + '&travelmode=walking';
+
+      var description = selected
+          ? selectedProperty.marketing
+          : selectedProperty.address + ' - ' + selectedProperty.distanceText + '. ' + selectedProperty.marketing;
+
+      app.ask(app.buildRichResponse()
+          .addSimpleResponse(selectedProperty.name)
+          .addBasicCard(app.buildBasicCard(description)
+              .setTitle(selectedProperty.name)
+              .addButton('Navigate Me', navigateUrl)
+              .setImage(selectedProperty.imageUrl, selectedProperty.name)
+              .setImageDisplay('CROPPED')
+          )
+      );
   }
 
   // d. build an action map, which maps intent names to functions
