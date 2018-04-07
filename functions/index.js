@@ -13,6 +13,8 @@ const HANDLE_PERMISSIONS_ACTION = 'handle.permissions';
 const SEARCH_WASHROOM_ACTION = 'search.washrooms';
 const PROPERTY_MARKETING_ACTION = 'property.marketing';
 const PROPERTY_REVIEW_ACTION = 'property.review';
+const SEARCH_PUBLIC_WASHROOM_ACTION = 'search.publicWashroom'
+const SEARCH_RESULT_IN_MAP_ACTION = 'search.showInMap'
 
 //ARGUMENTS
 const FILTER_ARGUMENT = 'washroom-filters';
@@ -165,10 +167,18 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
                                 .setTitle(item.name)
                                 .setDescription(description)
                                 .setImage(item.imageUrl, item.name)
-                            );
+							);
+							
                             maplink = maplink + '&markers=color:red%7Clabel:S%7C' + item.coordinates.latitude + ',' + item.coordinates.longitude;
-                        });
-                        app.askWithList(pinLocationMarkersResponse(maplink), list);
+						});
+						
+						if (!userStorage.showInMap) {
+							app.askWithList(pinLocationMarkersResponse(maplink, false), list);
+						}
+						else {
+							userStorage.showInMap = false;
+							app.ask(pinLocationMarkersResponse(maplink, true));
+						}
                     }
                 }
             });
@@ -184,7 +194,7 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
         return string.charAt(0).toUpperCase() + string.slice(1);
     }
 
-    function pinLocationMarkersResponse(maplink) {
+    function pinLocationMarkersResponse(maplink, renderMap) {
         let userLatitude = userStorage.location.latitude;
         let userLongitude = userStorage.location.longitude;
 
@@ -194,8 +204,15 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
 
         const mapViewURL = url.format(staticMapsURL);
 
-        return new RichResponse().addSimpleResponse('Here are a few places nearby. Which sounds better?')
-            .addSuggestionLink('Locations in Map', mapViewURL + maplink)
+		if (!renderMap) {
+			return new RichResponse().addSimpleResponse('Here are a few places nearby. Which sounds better?')
+				.addSuggestionLink('Locations in Map', mapViewURL + maplink);
+		}
+		else {
+			return new RichResponse()
+				.addSimpleResponse('Here are a few places nearby in map view.')
+				.addBasicCard(new BasicCard().setImage(mapViewURL + maplink, 'Washrooms Locations'));
+		}
     }
 
     function propertyMarketing(app) {
@@ -248,7 +265,33 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
                 .setImageDisplay('CROPPED')
             )
         );
-    }
+	}
+	
+	function searchPublicWashrooms(app) {
+		//TODO: Fix this method, it's not yet completed
+		var google = require('googleapis');
+		var request = require('request');
+		var searchEngineId = '002000148559876486237:pz8jmr2dmt4'
+		var seachKeyword = 'nearest washrooms'
+		var url = 'https://www.googleapis.com/customsearch/v1?key=' + config.maps.key + '&cx=' +  searchEngineId  + '&q=' + seachKeyword;
+		
+		console.log(url);
+		request(url,function(error, response, result) {
+			if(!error) {
+				console.log(result);
+				
+				app.ask({
+					speech: 'Search result found',
+					displayText: result
+				})
+			}
+		});
+	}
+
+	function showResultInMap(app) {
+		userStorage.showInMap = true;
+		return searchWashrooms(app);
+	}
 
     // d. build an action map, which maps intent names to functions
     let actionMap = new Map();
@@ -256,7 +299,9 @@ exports.freshroomsApi = functions.https.onRequest((request, response) => {
     actionMap.set(HANDLE_PERMISSIONS_ACTION, handlePermissions);
     actionMap.set(SEARCH_WASHROOM_ACTION, searchWashrooms);
     actionMap.set(PROPERTY_MARKETING_ACTION, propertyMarketing);
-    actionMap.set(PROPERTY_REVIEW_ACTION, propertyReview);
+	actionMap.set(PROPERTY_REVIEW_ACTION, propertyReview);
+	actionMap.set(SEARCH_PUBLIC_WASHROOM_ACTION, searchPublicWashrooms);
+	actionMap.set(SEARCH_RESULT_IN_MAP_ACTION, showResultInMap);
 
     app.handleRequest(actionMap);
 });
